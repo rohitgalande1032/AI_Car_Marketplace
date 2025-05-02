@@ -1,49 +1,65 @@
 "use client";
 
-import React, { useCallback, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import { Input } from "./ui/input";
-import { Camera, Upload } from "lucide-react";
+import { Camera, Search, Upload } from "lucide-react";
 import { Button } from "./ui/button";
 import { useDropzone } from "react-dropzone";
 import { toast } from "sonner";
 import { useRouter } from "next/navigation";
+import { processImageSearch } from "@/actions/home";
+import useFetch from "@/hooks/use-fetch";
 
 const HomeSearch = () => {
-  const [searchTerm, setSearchTerm] = useState("");
-  const [isImageSearchActive, setIsImageSearchActive] = useState(false);
-  const [imagePreview, setImagePreview] = useState("");
-  const [searchImage, setSearchImage] = useState(null);
-  const [isUpLoading, setIsUploading] = useState(false);
-
   const router = useRouter();
+  const [searchTerm, setSearchTerm] = useState("");
+  const [searchImage, setSearchImage] = useState(null);
+  const [imagePreview, setImagePreview] = useState("");
+  const [isUploading, setIsUploading] = useState(false);
+  const [isImageSearchActive, setIsImageSearchActive] = useState(false);
 
-  const handleTextSubmit = (e) => {
-    e.preventDefault();
-    if (!searchTerm.trim()) {
-      toast.error("Please enter a search term");
-      return;
+  // Use the useFetch hook for image processing
+  const {
+    loading: isProcessing,
+    fn: processImageFn,
+    data: processResult,
+    error: processError,
+  } = useFetch(processImageSearch);
+
+  // Handle process result and errors with useEffect
+  useEffect(() => {
+    if (processResult?.success) {
+      const params = new URLSearchParams();
+
+      // Add extracted params to the search
+      if (processResult.data.make) params.set("make", processResult.data.make);
+      if (processResult.data.bodyType)
+        params.set("bodyType", processResult.data.bodyType);
+      if (processResult.data.color)
+        params.set("color", processResult.data.color);
+
+      // Redirect to search results
+      router.push(`/cars?${params.toString()}`);
     }
+  }, [processResult, router]);
 
-    router.push(`/cars?search=${encodeURIComponent(searchTerm)}`);
-  };
-
-  const handleImageSearch = async (e) => {
-    e.preventDefault();
-    if (!searchImage) {
-      toast.error("Please upload an image first");
-      return;
+  useEffect(() => {
+    if (processError) {
+      toast.error(
+        "Failed to analyze image: " + (processError.message || "Unknown error")
+      );
     }
-  };
+  }, [processError]);
 
+  // Handle image upload with react-dropzone
   const onDrop = (acceptedFiles) => {
-    //Do something with the file
     const file = acceptedFiles[0];
-
     if (file) {
       if (file.size > 5 * 1024 * 1024) {
         toast.error("Image size must be less than 5MB");
         return;
       }
+
       setIsUploading(true);
       setSearchImage(file);
 
@@ -53,15 +69,14 @@ const HomeSearch = () => {
         setIsUploading(false);
         toast.success("Image uploaded successfully");
       };
-
       reader.onerror = () => {
         setIsUploading(false);
         toast.error("Failed to read the image");
       };
-
       reader.readAsDataURL(file);
     }
   };
+
   const { getRootProps, getInputProps, isDragActive, isDragReject } =
     useDropzone({
       onDrop,
@@ -71,18 +86,43 @@ const HomeSearch = () => {
       maxFiles: 1,
     });
 
+  // Handle text search submissions
+  const handleTextSearch = (e) => {
+    e.preventDefault();
+    if (!searchTerm.trim()) {
+      toast.error("Please enter a search term");
+      return;
+    }
+
+    router.push(`/cars?search=${encodeURIComponent(searchTerm)}`);
+  };
+
+  // Handle image search submissions
+  const handleImageSearch = async (e) => {
+    e.preventDefault();
+    if (!searchImage) {
+      toast.error("Please upload an image first");
+      return;
+    }
+
+    // Use the processImageFn from useFetch hook
+    await processImageFn(searchImage);
+  };
+
   return (
     <div>
-      <form onSubmit={handleTextSubmit}>
+      <form onSubmit={handleTextSearch}>
         <div className="relative flex items-center">
+          <Search className="absolute left-3 w-5 h-5" />
           <Input
             type="text"
             placeholder="Enter make, model, or use our AI Image Search..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
-            className="pl-10 pr-12 py-6 w-full rounded-full boder-gray-300 bg-white/95 backdrop-blur-sm"
+            className="pl-10 pr-12 py-6 w-full rounded-full border-gray-300 bg-white/95 backdrop-blur-sm"
           />
 
+          {/* Image Search Button */}
           <div className="absolute right-[100px]">
             <Camera
               size={35}
@@ -94,11 +134,8 @@ const HomeSearch = () => {
               }}
             />
           </div>
-          <Button
-            type="submit"
-            className="absolute right-2 rounded-full cursor-pointer"
-            onClick={handleTextSubmit}
-          >
+
+          <Button type="submit" className="absolute right-2 rounded-full">
             Search
           </Button>
         </div>
@@ -106,7 +143,7 @@ const HomeSearch = () => {
 
       {isImageSearchActive && (
         <div className="mt-4">
-          <form onSubmit={handleImageSearch}>
+          <form onSubmit={handleImageSearch} className="space-y-4">
             <div className="border-2 border-dashed border-gray-300 rounded-3xl p-6 text-center">
               {imagePreview ? (
                 <div className="flex flex-col items-center">
@@ -120,7 +157,7 @@ const HomeSearch = () => {
                     onClick={() => {
                       setSearchImage(null);
                       setImagePreview("");
-                      toast.info("image removed");
+                      toast.info("Image removed");
                     }}
                   >
                     Remove Image
@@ -131,9 +168,9 @@ const HomeSearch = () => {
                   <input {...getInputProps()} />
                   <div className="flex flex-col items-center">
                     <Upload className="h-12 w-12 text-gray-400 mb-2" />
-                    <p className="text-gray-500 mb-4">
+                    <p className="text-gray-500 mb-2">
                       {isDragActive && !isDragReject
-                        ? "Leave the file here to upload ..."
+                        ? "Leave the file here to upload"
                         : "Drag & drop a car image or click to select"}
                     </p>
                     {isDragReject && (
@@ -150,10 +187,14 @@ const HomeSearch = () => {
             {imagePreview && (
               <Button
                 type="submit"
-                className="w-full mt-2"
-                disabled={isUpLoading}
+                className="w-full"
+                disabled={isUploading || isProcessing}
               >
-                {isUpLoading ? "Uploading..." : "Search with this Image"}
+                {isUploading
+                  ? "Uploading..."
+                  : isProcessing
+                  ? "Analyzing image..."
+                  : "Search with this Image"}
               </Button>
             )}
           </form>
